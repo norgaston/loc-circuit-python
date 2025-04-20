@@ -4,27 +4,6 @@ import serial
 import threading
 from font import *
 
-# Configuración de comunicación serial
-SERIAL_PORT = '/dev/ttyUSB1'
-BAUDRATE = 500000
-
-# Configuración de la pantalla
-COLS, ROWS = 64, 41
-CHAR_WIDTH, CHAR_HEIGHT = 10, 14
-SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
-
-# Mapa de colores (BF1-BF2)
-COLOR_MAP = {
-    0b00: (0, 0, 0),       # Negro
-    0b01: (128, 128, 128), # Gris
-    0b10: (255, 255, 255), # Blanco
-    0b11: (0, 0, 0)        # Negro
-}
-
-# Inicializar VRAM
-vram = np.zeros((ROWS, COLS), dtype=np.uint16)
-vram_lock = threading.Lock()
-
 # Función para decodificar caracteres
 def decode_char(value):
     char_code = value & 0x7F       # Bits 6-0: ASCII
@@ -60,7 +39,6 @@ def draw_char(img, col, row, char_code, borders, color):
                         img[start_y+1+y, start_x+1+x] = (128, 128, 128)
 
 def serial_receiver():
-    #ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
     buffer = bytearray()
     state = "WAIT_STX"
     current_row = 1  # Default (1-based)
@@ -146,12 +124,11 @@ def mouse_callback(event, x, y, flags, param):
 
             char_code, borders, color = decode_char(value)
 
-            print(f"Celda: Fila {row+1}, Columna {col+1}")
-            #print(f"Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")
+            print(f"\nFila {row+1}, Columna {col+1}")
             print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
-            #print(f"🧱 Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
+            #print(f"Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")            
+            #print(f"Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
             #print(f"Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
-
 
 def send_12bits(data):
     """
@@ -167,6 +144,28 @@ def send_12bits(data):
     
     ser.write(bytes([byte1, byte2]))
     print(f"Enviados 12 bits: 0x{byte1:02X} 0x{byte2:02X}")
+
+
+# Configuración de comunicación serial
+SERIAL_PORT = '/dev/ttyUSB1'
+BAUDRATE = 500000
+
+# Configuración de la pantalla
+COLS, ROWS = 64, 41
+CHAR_WIDTH, CHAR_HEIGHT = 10, 14
+SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
+
+# Mapa de colores (BF1-BF2)
+COLOR_MAP = {
+    0b00: (0, 0, 0),       # Negro
+    0b01: (128, 128, 128), # Gris
+    0b10: (255, 255, 255), # Blanco
+    0b11: (0, 0, 0)        # Negro
+}
+
+# Inicializar VRAM
+vram = np.zeros((ROWS, COLS), dtype=np.uint16)
+vram_lock = threading.Lock()
 
 # Iniciar serial
 ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
