@@ -8,28 +8,7 @@ CHAR: 12 bits (BF1-BF2 + bordes + ASCII)
 ETX: 000000000011 (0x003)
 */
 
-const char* octalData[] = {
-  "00000002", 
-  "00130100", 
-  "00110140", 
-  "00400124",
-  "01230040", 
-  "00640060", 
-  "00400040", 
-  "00400123",
-  "00130101", 
-  "00110140", 
-  "00400124", 
-  "01230040",
-  "00670066", 
-  "00400040", 
-  "00400123",
-  "00130102", 
-  "00110140", 
-  "00400040", 
-  "00400040",
-  "00400003"
-};
+#include "vram_data.h"  
 
 const int numItems = sizeof(octalData) / sizeof(octalData[0]);
 int currentIndex = 0;
@@ -58,18 +37,18 @@ void setup() {
 
 void loop() {
   const char* currentOctal = octalData[currentIndex];
-  
+
   // Convertir dato octal a 32 bits
   uint32_t fullValue = strtoul(currentOctal, NULL, 8);
-  
+
   // Extraer dos palabras de 12 bits (24 bits útiles)
-  uint16_t word1 = (fullValue >> 12) & 0x0FFF; // Primeros 12 bits
-  uint16_t word2 = fullValue & 0x0FFF;         // Últimos 12 bits
-  
+  uint16_t word1 = (fullValue >> 12) & 0x0FFF;  // Primeros 12 bits
+  uint16_t word2 = fullValue & 0x0FFF;          // Últimos 12 bits
+
   // Enviar ambas palabras
   send12Bits(word1);
   send12Bits(word2);
 
   currentIndex = (currentIndex + 1) % numItems;
-  delay(10); // Ajustar según necesidad
+  delay(10);   
 }

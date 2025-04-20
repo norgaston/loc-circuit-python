@@ -137,7 +137,7 @@ def serial_receiver():
 # Callback para clics del mouse
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
-        print(f"\n🖱️ Click en coordenadas: x={x}, y={y}")
+        #print(f"\nClick en coordenadas: x={x}, y={y}")
 
         col, row = x // CHAR_WIDTH, y // CHAR_HEIGHT
         if 0 <= col < COLS and 0 <= row < ROWS:
@@ -146,10 +146,11 @@ def mouse_callback(event, x, y, flags, param):
 
             char_code, borders, color = decode_char(value)
 
-            print(f"📍 Celda: Fila {row+1}, Columna {col+1}")
-            print(f"🔤 Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")
-            # print(f"🧱 Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
-            print(f"🎨 Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
+            print(f"Celda: Fila {row+1}, Columna {col+1}")
+            #print(f"Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")
+            print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
+            #print(f"🧱 Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
+            #print(f"Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
 
 
 def send_12bits(data):
