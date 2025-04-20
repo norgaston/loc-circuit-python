@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import numpy as np
 import cv2
 import serial
@@ -6,13 +5,13 @@ import threading
 from font import *
 
 # Configuración de comunicación serial
-SERIAL_PORT = '/dev/ttyUSB0'
+SERIAL_PORT = '/dev/ttyUSB1'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
 COLS, ROWS = 64, 41
 CHAR_WIDTH, CHAR_HEIGHT = 10, 14
-SCREEN_WIDTH, SCREEN_HEIGHT = COLS * CHAR_WIDTH, ROWS * CHAR_HEIGHT
+SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
 
 # Mapa de colores (BF1-BF2)
 COLOR_MAP = {
@@ -32,15 +31,7 @@ def decode_char(value):
     borders = (value >> 7) & 0x7   # Bits 9-7: bordes
     color = (value >> 10) & 0x3    # Bits 11-10: color
     return char_code, borders, color
-
-#!/usr/bin/env python3
-import numpy as np
-import cv2
-import serial
-import threading
-from font import *   
-
-
+ 
 def draw_char(img, col, row, char_code, borders, color):
     start_x, start_y = col * CHAR_WIDTH, row * CHAR_HEIGHT
     
@@ -68,175 +59,131 @@ def draw_char(img, col, row, char_code, borders, color):
                     if row_data & (1 << (7 - x)):
                         img[start_y+1+y, start_x+1+x] = (128, 128, 128)
 
-def serial_receiver_():
-    ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
-    buffer = bytearray()
-    
-    while ser.is_open:
-        try:
-            data = ser.read(ser.in_waiting or 1)
-            if data:
-                buffer.extend(data)
-                
-                # Procesar paquetes completos (14 bytes)
-                while len(buffer) >= 14:
-                    # Decodificar palabras de 12 bits (big-endian) con máscara
-                    words = [((buffer[i] << 8 | buffer[i+1]) & 0x0FFF) for i in range(0, 14, 2)]
-                    
-                    # Extraer posición y datos
-                    row = (words[2] & 0x3F)  # 6 bits bajos (RN)
-                    col = (words[4] & 0x3F)  # 6 bits bajos (CN)
-                    char_data = words[5]      # CHAR sin desplazamiento
-                    
-                    # Ajustar índices (empiezan en 1)
-                    row += 1
-                    col += 1
-                    
-                    # Actualizar VRAM (verificar límites)
-                    with vram_lock:
-                        if 1 <= row <= ROWS and 1 <= col <= COLS:
-                            vram[row-1, col-1] = char_data  # Índices 0-based
-                    
-                    buffer = buffer[14:]
-                    
-        except Exception as e:
-            print(f"Error serial: {e}")
-            break
-
 def serial_receiver():
-    ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
+    #ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
     buffer = bytearray()
     state = "WAIT_STX"
-    current_row = 0
-    current_col = 0
+    current_row = 1  # Default (1-based)
+    current_col = 1  # Default (1-based)
+    packet_active = False
     
-    # Constantes de 12 bits
-    CONTROL_WORDS = {
-        0x002: "STX",
-        0x00B: "VT", 
-        0x009: "HT",
-        0x003: "ETX"
-    }
-
-    def process_word(word):
-        nonlocal current_row, current_col
-        if word in CONTROL_WORDS:
-            return CONTROL_WORDS[word]
-        
-        # Decodificar RN/CN (000001xxxxxx)
-        if (word & 0xFC0) == 0x040:  # Máscara 111111000000
-            return ("POS", word & 0x3F)  # Extraer 6 bits bajos
-        
-        # Carácter normal
-        return ("CHAR", word)
-
+    # Constantes de control (12 bits)
+    STX = 0x002
+    VT = 0x00B
+    HT = 0x009
+    ETX = 0x003
+    
+    def get_word(data):
+        """Combina 2 bytes en una palabra de 16 bits y aplica máscara de 12 bits"""
+        return (data[0] << 8 | data[1]) & 0x0FFF
+    
+    def decode_position(word):
+        """Decodifica RN/CN (000001xxxxxx) a posición 1-based"""
+        return (word & 0x3F) + 1
+    
     while True:
+        # Leer datos del serial
         data = ser.read(ser.in_waiting or 1)
         if data:
             buffer.extend(data)
         
+        # Procesar buffer mientras tengamos al menos 2 bytes
         while len(buffer) >= 2:
-            word = (buffer[0] << 8) | buffer[1]
-            buffer = buffer[2:]
-            
-            res = process_word(word & 0x0FFF)  # Solo 12 bits
+            word = get_word(buffer[:2])
+            buffer = buffer[2:]  # Consumir los bytes procesados
             
             if state == "WAIT_STX":
-                if res == "STX":
-                    state = "HEADER"
-                    
-            elif state == "HEADER":
-                if res[0] == "POS":
-                    current_row = res[1] + 1  # 1-based
-                    state = "HEADER_COL"
-                    
-            elif state == "HEADER_COL":
-                if res[0] == "POS":
-                    current_col = res[1] + 1
-                    state = "DATA"
-                    
-            elif state == "DATA":
-                if res == "ETX":
+                if word == STX:
+                    packet_active = True
+                    state = "IN_PACKET"
+                    #print("\nInicio de paquete detectado")
+            
+            elif state == "IN_PACKET":
+                if word == ETX:
+                    packet_active = False
                     state = "WAIT_STX"
-                elif res[0] == "CHAR":
+                    #print("Fin de paquete detectado\n")
+                
+                elif word == VT:
+                    state = "READ_ROW"
+                
+                elif word == HT:
+                    state = "READ_COL"
+                
+                elif packet_active:
+                    # Procesar como carácter
+                    char_data = word
                     with vram_lock:
-                        if current_row <= ROWS and current_col <= COLS:
-                            vram[current_row-1, current_col-1] = res[1]
+                        if 1 <= current_row <= ROWS and 1 <= current_col <= COLS:
+                            vram[current_row-1, current_col-1] = char_data
+                            #print(f"Carácter 0x{char_data:03X} en ({current_row}, {current_col})")
                             current_col += 1
                             if current_col > COLS:
                                 current_col = 1
                                 current_row += 1
-
-    while ser.is_open:
-        try:
-            # Leer datos disponibles
-            data = ser.read(ser.in_waiting or 1)
-            if data:
-                buffer.extend(data)
+                                if current_row > ROWS:
+                                    current_row = 1
             
-            # Procesar buffer
-            while len(buffer) >= 2:
-                if not in_packet:
-                    # Buscar STX
-                    if get_word(buffer[0:2]) == STX:
-                        in_packet = True
-                        current_packet = bytearray()
-                        buffer = buffer[2:]
-                    else:
-                        buffer.pop(0)  # Descartar byte no válido
-                else:
-                    # Buscar ETX en todo el buffer
-                    found_etx = False
-                    for i in range(0, len(buffer)-1, 2):
-                        if get_word(buffer[i:i+2]) == ETX:
-                            # Agregar datos al paquete y procesar
-                            current_packet.extend(buffer[:i])
-                            process_packet(current_packet)
-                            buffer = buffer[i+2:]
-                            in_packet = False
-                            found_etx = True
-                            break
-                    
-                    if not found_etx:
-                        # Agregar todos los datos al paquete actual
-                        current_packet.extend(buffer)
-                        buffer.clear()
-                    break
-                        
-        except Exception as e:
-            print(f"Error en receptor avanzado: {e}")
-            buffer.clear()
-            in_packet = False
+            elif state == "READ_ROW":
+                current_row = decode_position(word)
+                #print(f"Nueva fila: {current_row}")
+                state = "IN_PACKET"
+            
+            elif state == "READ_COL":
+                current_col = decode_position(word)
+                #print(f"Nueva columna: {current_col}")
+                state = "IN_PACKET"
 
 # Callback para clics del mouse
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
+        print(f"\n🖱️ Click en coordenadas: x={x}, y={y}")
+
         col, row = x // CHAR_WIDTH, y // CHAR_HEIGHT
         if 0 <= col < COLS and 0 <= row < ROWS:
             with vram_lock:
-                value = vram[row, col]
+                value = vram[row][col]  # Asegurate que vram sea lista de listas o np.array
+
             char_code, borders, color = decode_char(value)
-            
-            print(f"\nCelda: Fila {row+1}, Columna {col+1}")
-            print(f"Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")
-            #print(f"Bordes: Superior={bool(borders & 0b4)}, Izquierdo={bool(borders & 0b2)}, Inferior={bool(borders & 0b1)}")
-            print(f"Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
+
+            print(f"📍 Celda: Fila {row+1}, Columna {col+1}")
+            print(f"🔤 Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")
+            # print(f"🧱 Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
+            print(f"🎨 Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
+
+
+def send_12bits(data):
+    """
+    Envía un valor de 12 bits usando 2 bytes (formato Arduino)
+    :param data: Entero entre 0 y 4095 (0x0FFF)
+    """
+    if data > 0x0FFF:
+        raise ValueError("El valor debe ser de 12 bits (0-4095)")
+    
+    # Empaquetar en 2 bytes (big-endian)
+    byte1 = (data >> 8) & 0xFF  # Bits 11-8
+    byte2 = data & 0xFF         # Bits 7-0
+    
+    ser.write(bytes([byte1, byte2]))
+    print(f"Enviados 12 bits: 0x{byte1:02X} 0x{byte2:02X}")
+
+# Iniciar serial
+ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
 
 # Iniciar hilo serial
 serial_thread = threading.Thread(target=serial_receiver, daemon=True)
 serial_thread.start()
 
 # Configurar ventana y callback de mouse
-cv2.namedWindow('Video con Texto', cv2.WINDOW_NORMAL)
-cv2.resizeWindow('Video con Texto', SCREEN_WIDTH, SCREEN_HEIGHT)
-cv2.setMouseCallback('Video con Texto', mouse_callback)
+cv2.namedWindow('Video LCC', cv2.WINDOW_NORMAL)
+cv2.resizeWindow('Video LCC', SCREEN_WIDTH, SCREEN_HEIGHT)
+cv2.setMouseCallback('Video LCC', mouse_callback)
 
 # Inicializar cámara
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 if not cap.isOpened():
     print("Error al abrir la cámara")
     exit()
-
 
 """
 C0 = 0b000;  # nada
@@ -257,6 +204,7 @@ vram[3][1] = ord('A') | (C4 << 7) | (0b11 << 10)
 vram[3][2] = ord('G') | (C4 << 7) | (0b11 << 10)
 vram[3][3] = ord(' ') | (C2 << 7) | (0b11 << 10)
 """
+
 
 # Bucle principal
 while True:
@@ -281,7 +229,7 @@ while True:
     cv2.addWeighted(overlay, 0.99, frame, 0.1, 0, frame)
     
     # Mostrar resultado
-    cv2.imshow('Video con Texto', frame)
+    cv2.imshow('Video LCC', frame)
     
     # Salir con ESC
     if cv2.waitKey(1) & 0xFF == 27:
