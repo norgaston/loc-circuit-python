@@ -130,24 +130,49 @@ def mouse_callback(event, x, y, flags, param):
             #print(f"Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
             #print(f"Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
 
-def send_12bits(data):
-    """
-    Envía un valor de 12 bits usando 2 bytes (formato Arduino)
-    :param data: Entero entre 0 y 4095 (0x0FFF)
-    """
-    if data > 0x0FFF:
-        raise ValueError("El valor debe ser de 12 bits (0-4095)")
-    
-    # Empaquetar en 2 bytes (big-endian)
-    byte1 = (data >> 8) & 0xFF  # Bits 11-8
-    byte2 = data & 0xFF         # Bits 7-0
-    
-    ser.write(bytes([byte1, byte2]))
-    print(f"Enviados 12 bits: 0x{byte1:02X} 0x{byte2:02X}")
+            data = pack_data(
+                            valid=True,
+                            lightpen_active=True,
+                            column=col,     # 6 bits (0-63)
+                            points=6,       # 3 bits (0-7)
+                            row=row,        # 6 bits (0-63)
+                            lines=8         # 3 bits (0-7)
+                            )
+            send_24bits(data)
 
+def send_24bits(data):    
+    ser.write(data)
+    print(f"Enviados: {data.hex()}")
+
+def pack_data(valid, lightpen_active, column, points, row, lines):
+    # Validar rangos de los parámetros
+    if not isinstance(valid, bool) or not isinstance(lightpen_active, bool):
+        raise ValueError("valid y lightpen_active deben ser booleanos")
+    if column < 0 or column > 63:
+        raise ValueError("Columna debe estar entre 0 y 63")
+    if points < 0 or points > 14 or points % 2 != 0:
+        raise ValueError("Points debe ser par entre 0 y 14")
+    if row < 0 or row > 63:
+        raise ValueError("Row debe estar entre 0 y 63")
+    if lines < 0 or lines > 14 or lines % 2 != 0:
+        raise ValueError("Lines debe ser par entre 0 y 14")
+
+    # Construir el paquete de 24 bits
+    data = 0
+    data |= valid << 23
+    data |= lightpen_active << 22
+    data |= (column & 0x3F) << 16           # 6 bits para columna (0-63)
+    data |= ((points // 2) & 0x07) << 13    # 3 bits para puntos (8,4,2)
+    data |= (row & 0x3F) << 4               # 6 bits para fila (0-63)
+    data |= ((lines // 2) & 0x07) << 1      # 3 bits para líneas (8,4,2)
+
+    print(f"Bits enviados: {data:024b}")
+    
+    # Convertir a 3 bytes (big-endian)
+    return data.to_bytes(3, byteorder='big')
 
 # Configuración de comunicación serial
-SERIAL_PORT = '/dev/ttyUSB1'
+SERIAL_PORT = '/dev/ttyUSB0'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
