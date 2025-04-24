@@ -112,32 +112,32 @@ def serial_receiver():
                 #print(f"Nueva columna: {current_col}")
                 state = "IN_PACKET"
 
-# Callback para clics del mouse
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
-        #print(f"\nClick en coordenadas: x={x}, y={y}")
-
         col, row = x // CHAR_WIDTH, y // CHAR_HEIGHT
+        
         if 0 <= col < COLS and 0 <= row < ROWS:
             with vram_lock:
-                value = vram[row][col]  # Asegurate que vram sea lista de listas o np.array
+                value = vram[row][col]
 
             char_code, borders, color = decode_char(value)
+            
+            # Asegurar booleanos nativos de Python
+            is_loc = bool(char_code != ord(' ') and borders != 0)  # Conversión explícita
+            lightpen_active = True  # Booleano directo
 
-            print(f"\nFila {row+1}, Columna {col+1}")
+            print(f"\nFila {row+1}, Columna {col+1} - {'LOC' if is_loc else 'No es LOC'}")
             print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
-            #print(f"Carácter: {char_code} ('{chr(char_code) if 32 <= char_code < 127 else ' '}')")            
-            #print(f"Bordes: Superior={bool(borders & 0b100)}, Izquierdo={bool(borders & 0b010)}, Inferior={bool(borders & 0b001)}")
-            #print(f"Color: {['Negro', 'Gris', 'Blanco', 'Negro'][color]}")
 
+            # Empaquetar con booleanos válidos
             data = pack_data(
-                            valid=True,
-                            lightpen_active=True,
-                            column=col,     # 6 bits (0-63)
-                            points=6,       # 3 bits (0-7)
-                            row=row,        # 6 bits (0-63)
-                            lines=8         # 3 bits (0-7)
-                            )
+                valid=is_loc,
+                lightpen_active=lightpen_active,  # Asegurar tipo booleano
+                column=col,
+                points=6,
+                row=row,
+                lines=8
+            )
             send_24bits(data)
 
 def send_24bits(data):    
