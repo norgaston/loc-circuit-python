@@ -74,6 +74,7 @@ void setup() {
   pinMode(INPEN, INPUT);
   pinMode(RESET, INPUT);
   pinMode(SNW, OUTPUT);
+  // Deshabilitar palabras de salida
   digitalWrite(SNW, HIGH);
 }
 
@@ -82,7 +83,7 @@ void loop() {
   digitalWrite(SNW, LOW);
   // Leer y enviar OUTPUT BUS cuando OUTPACK está activo
   if (digitalRead(OUTPACK) == LOW) {
-    // deshabilitar nuevas palabras de salidas hasta terminar de procesar
+    // Deshabilitar nuevas palabras de salidas hasta terminar de procesar
     digitalWrite(SNW, HIGH);
     send24BitsSplit();
   }

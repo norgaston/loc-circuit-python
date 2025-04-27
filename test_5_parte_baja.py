@@ -139,6 +139,7 @@ def mouse_callback(event, x, y, flags, param):
                 lines=8
             )
             send_24bits(data)
+            send_24bits('012'.encode())
 
 def send_24bits(data):    
     ser.write(data)
@@ -172,7 +173,9 @@ def pack_data(valid, lightpen_active, column, points, row, lines):
     return data.to_bytes(3, byteorder='big')
 
 # Configuración de comunicación serial
-SERIAL_PORT = '/dev/ttyUSB0'
+#SERIAL_PORT = '/dev/ttyUSB0'
+SERIAL_PORT = '/dev/ttyACM0'
+#BAUDRATE = 115200
 BAUDRATE = 500000
 
 # Configuración de la pantalla
