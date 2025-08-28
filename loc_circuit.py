@@ -1,8 +1,8 @@
-import numpy as np
 import cv2
 import serial
-import threading
+import subprocess
 from font import *
+from vram import *
 
 # Función para decodificar caracteres
 def decode_char(value):
@@ -58,60 +58,85 @@ def serial_receiver():
     def decode_position(word):
         """Decodifica RN/CN (000001xxxxxx) a posición 1-based"""
         return (word & 0x3F) + 1
+
+    # Abrir el archivo manualmente
+    archivo = open('datos_octal.txt', 'a')
     
-    while True:
-        # Leer datos del serial
-        data = ser.read(ser.in_waiting or 1)
-        if data:
-            buffer.extend(data)
-        
-        # Procesar buffer mientras tengamos al menos 2 bytes
-        while len(buffer) >= 2:
-            word = get_word(buffer[:2])
-            buffer = buffer[2:]  # Consumir los bytes procesados
+    try:
+    
+        while True:
+            # Leer datos del serial
+            data = ser.read(ser.in_waiting or 1)
+            if data:
+                buffer.extend(data)
             
-            if state == "WAIT_STX":
-                if word == STX:
-                    packet_active = True
+            # Procesar buffer mientras tengamos al menos 2 bytes
+            while len(buffer) >= 2:
+                word = get_word(buffer[:2])
+                buffer = buffer[2:]  # Consumir los bytes procesados
+                
+                # Convertir palabra a octal (4 dígitos con padding de ceros)
+                octal_word = f"{word:04o}"  # Formato octal de 4 dígitos
+                # Escribir en archivo
+                #archivo.write(octal_word + '\n')
+                #print(octal_word)
+                
+                if state == "WAIT_STX":
+                    if word == STX:
+                        packet_active = True
+                        state = "IN_PACKET"
+                        #print("\nSTX")
+                        #print(octal_word)  # Guardar STX en octal
+                
+                elif state == "IN_PACKET":
+                    if word == ETX:
+                        packet_active = False
+                        state = "WAIT_STX"
+                        #print("ETX\n")
+                        #print(octal_word)  # Guardar ETX en octal
+                    
+                    elif word == VT:
+                        state = "READ_ROW"
+                        #print("VT\n")
+                        #print(octal_word)  # Guardar VT en octal
+                    
+                    elif word == HT:
+                        state = "READ_COL"
+                        #print("HT\n")
+                        #print(octal_word)  # Guardar HT en octal
+                    
+                    elif packet_active:
+                        # Procesar como carácter
+                        char_data = word
+                        with vram_lock:
+                            if 1 <= current_row <= ROWS and 1 <= current_col <= COLS:
+                                vram[current_row-1, current_col-1] = char_data
+                                # Imprimir el valor octal en lugar del carácter
+                                #print(octal_word)
+                                current_col += 1
+                                if current_col > COLS:
+                                    current_col = 1
+                                    current_row += 1
+                                    if current_row > ROWS:
+                                        current_row = 1
+                
+                elif state == "READ_ROW":
+                    current_row = decode_position(word)
+                    #print(current_row)
+                    #print(octal_word)  # Guardar valor de fila en octal
                     state = "IN_PACKET"
-                    print("\nInicio de paquete detectado")
-            
-            elif state == "IN_PACKET":
-                if word == ETX:
-                    packet_active = False
-                    state = "WAIT_STX"
-                    print("Fin de paquete detectado\n")
                 
-                elif word == VT:
-                    state = "READ_ROW"
-                
-                elif word == HT:
-                    state = "READ_COL"
-                
-                elif packet_active:
-                    # Procesar como carácter
-                    char_data = word
-                    with vram_lock:
-                        if 1 <= current_row <= ROWS and 1 <= current_col <= COLS:
-                            vram[current_row-1, current_col-1] = char_data
-                            #print(f"Carácter 0x{char_data:03X} en ({current_row}, {current_col})")
-                            print(char_data)
-                            current_col += 1
-                            if current_col > COLS:
-                                current_col = 1
-                                current_row += 1
-                                if current_row > ROWS:
-                                    current_row = 1
-            
-            elif state == "READ_ROW":
-                current_row = decode_position(word)
-                print(f"Nueva fila: {current_row}")
-                state = "IN_PACKET"
-            
-            elif state == "READ_COL":
-                current_col = decode_position(word)
-                #print(f"Nueva columna: {current_col}")
-                state = "IN_PACKET"
+                elif state == "READ_COL":
+                    current_col = decode_position(word)
+                    #print(current_col)
+                    #print(octal_word)  # Guardar valor de columna en octal
+                    state = "IN_PACKET"
+
+    except KeyboardInterrupt:
+        print("\nInterrupción recibida, cerrando archivo...")
+    finally:
+        archivo.close()  # Cerrar el archivo
+        ser.close()      # Cerrar el serial
 
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
@@ -128,7 +153,8 @@ def mouse_callback(event, x, y, flags, param):
             lightpen_active = True  # Booleano directo
 
             print(f"\nFila {row+1}, Columna {col+1} - {'LOC' if is_loc else 'No es LOC'}")
-            print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
+            
+            #print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
 
             # Empaquetar con booleanos válidos
             data = pack_data(
@@ -140,11 +166,21 @@ def mouse_callback(event, x, y, flags, param):
                 lines=8
             )
             send_24bits(data)
-            send_24bits('012'.encode())
+    elif event == cv2.EVENT_LBUTTONUP:
+        data = pack_data(
+                valid= False,
+                lightpen_active= False,  # Asegurar tipo booleano
+                column=11,
+                points=6,
+                row=11,
+                lines=8
+            )
+        send_24bits(data)
+        
 
 def send_24bits(data):    
     ser.write(data)
-    print(f"Enviados: {data.hex()}")
+    #print(f"bytes enviados: {data.hex()}")
 
 def pack_data(valid, lightpen_active, column, points, row, lines):
     # Validar rangos de los parámetros
@@ -168,10 +204,15 @@ def pack_data(valid, lightpen_active, column, points, row, lines):
     data |= (row & 0x3F) << 4               # 6 bits para fila (0-63)
     data |= ((lines // 2) & 0x07) << 1      # 3 bits para líneas (8,4,2)
 
-    print(f"Bits enviados: {data:024b}")
+    print(f"paquete: {data:024b}")
     
     # Convertir a 3 bytes (big-endian)
     return data.to_bytes(3, byteorder='big')
+
+def save_vram(filename):
+    with vram_lock:
+        np.save(filename, vram)
+        print(f"VRAM guardada en {filename}")
 
 # Configuración de comunicación serial
 #SERIAL_PORT = '/dev/ttyUSB0'
@@ -180,7 +221,7 @@ SERIAL_PORT = '/dev/ttyACM0'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
-COLS, ROWS = 64, 41
+#COLS, ROWS = 64, 41
 CHAR_WIDTH, CHAR_HEIGHT = 10, 14
 SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
 
@@ -193,8 +234,11 @@ COLOR_MAP = {
 }
 
 # Inicializar VRAM
-vram = np.zeros((ROWS, COLS), dtype=np.uint16)
-vram_lock = threading.Lock()
+#vram = np.zeros((ROWS, COLS), dtype=np.uint16)
+#vram_lock = threading.Lock()
+
+vram = vram
+vram_lock = vram_lock
 
 # Iniciar serial
 ser = serial.Serial(SERIAL_PORT, BAUDRATE, timeout=0.1)
@@ -210,29 +254,10 @@ cv2.setMouseCallback('Video LCC', mouse_callback)
 
 # Inicializar cámara
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+#cap = cv2.VideoCapture(2)
 if not cap.isOpened():
     print("Error al abrir la cámara")
     exit()
-
-"""
-C0 = 0b000;  # nada
-C1 = 0b001;  # arriba
-C2 = 0b010;  # izquierda
-C3 = 0b011;  # arriba-izquierda
-C4 = 0b100;  # abajo
-C5 = 0b101;  # arriba-abajo
-C6 = 0b110;  # izquierda-abajo
-C7 = 0b111;  # arriba-izquierda-abajo
-
-vram[2][0] = ord('A') | (C3 << 7) | (0b11 << 10)
-vram[2][1] = ord('/') | (C1 << 7) | (0b11 << 10)
-vram[2][2] = ord('N') | (C1 << 7) | (0b11 << 10)
-vram[2][3] = ord(' ') | (C2 << 7) | (0b11 << 10)
-vram[3][0] = ord('P') | (C6 << 7) | (0b11 << 10)
-vram[3][1] = ord('A') | (C4 << 7) | (0b11 << 10)
-vram[3][2] = ord('G') | (C4 << 7) | (0b11 << 10)
-vram[3][3] = ord(' ') | (C2 << 7) | (0b11 << 10)
-"""
 
 
 # Bucle principal
@@ -260,8 +285,12 @@ while True:
     # Mostrar resultado
     cv2.imshow('Video LCC', frame)
     
-    # Salir con ESC
-    if cv2.waitKey(1) & 0xFF == 27:
+    # Salir con 'q' (apaga el sistema) o ESC (solo cierra la app)
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):  # Tecla 'q' → Apagar
+        subprocess.run(["sudo", "shutdown", "-h", "now"], check=True)
+        break
+    elif key == 27:     # Tecla ESC → Solo salir
         break
 
 # Limpieza
