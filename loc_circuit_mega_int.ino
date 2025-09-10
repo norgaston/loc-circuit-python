@@ -1,15 +1,15 @@
 #include <util/delay.h>
 
-// PB4 OUTPACK (INT4) INPUT
-// PB5 INPEN (INT5) INPUT
-// PB6 RESET INPUT
-// PB7 SNW OUTPUT
+// PE5 OUTPACK (INT5) INPUT
+// PE4 INPEN (INT4) INPUT
+// PH3 RESET INPUT
+// PH4 SNW OUTPUT
 
 
 // ====================== CONFIGURACIÓN DE REGISTROS ======================
-#define SNW_BIT PE5
-#define SNW_PORT PORTE
-#define SNW_DDR DDRE
+#define SNW_BIT PH4
+#define SNW_PORT PORTH
+#define SNW_DDR DDRH
 
 // ====================== VARIABLES GLOBALES ======================
 volatile uint8_t receivedData[3];
@@ -22,37 +22,63 @@ void setup() {
   Serial.begin(500000);
 
   // Configuración de puertos de datos
-  // OUTPUT BUS - ENTRADAS
+  // OUTPUT BUS - ENTRADAS 24 bits para leer lo que envía la SMR-MU
+  // PORTF - parte baja
+  // U01 -- 004
+  // U02 -- 006
+  // U03 -- 031
+  // U04 -- 034
+  // U05 -- 009
+  // U06 -- 007
+  // U07 -- 051
+  // U08 -- 081
+  // PORTK - parte media
+  // U09 -- 064
+  // U10 -- 049
+  // U11 -- 043
+  // U12 -- 039
+  // U13 -- 028
+  // U14 -- 029
+  // U15 -- 033
+  // U16 -- 032
+  // PORTA - parte alta
+  // U17 -- 050
+  // U18 -- 024
+  // U19 -- 053
+  // U20 -- 083
+  // U21 -- 063
+  // U22 -- 088
+  // U23 -- 061
+  // U24 -- 041
+
   DDRA = 0x00;
   DDRK = 0x00;
   DDRF = 0x00;
   // Habilito pullups
-  PORTA = 0xFF;
-  PORTK = 0xFF;
-  PORTF = 0xFF;
-
-  PORTE = 0xFF;
-
-  // INPUT BUS - SALIDAS
+  PORTA = 0xFF; // U17-U24 entras testeadas ok 26-08-25
+  PORTK = 0xFF; // U09-U16
+  PORTF = 0xFF; // U01-U08
+  // INPUT BUS - SALIDAS 19 bits que envío con los datos de posición del LOC a la SMR-MU (vía DCL-SOCO)
   DDRB = 0xFF;
   DDRL = 0xFF;
   DDRC = 0xFF;
-
-  //pinMode(LED_BUILTIN, OUTPUT);
-
+  // pongo las salidas en cero
   PORTB = 0x00;
   PORTL = 0x00;
   PORTC = 0x00;
-
   // Configuración de pines de control
+  DDRE = 0x00;
+  DDRH = 0x00;
+  // Habilito pullups en PORTE y PORTH, donde están OUTPACK, INPEN y RESET
+  PORTE = 0xFF;
+  PORTH = 0xFF;
+  // Configuri la salida "START NEW WORD"
   SNW_DDR |= (1 << SNW_BIT);
   SNW_PORT |= (1 << SNW_BIT);
-
   // Interrupción externa (igual que antes)
-  EICRB |= (1 << ISC41);
-  EIMSK |= (1 << INT4);
-
-  sei();  // Habilitar interrupciones globales
+  //EICRB |= (1 << ISC41);
+  //EIMSK |= (1 << INT4);
+  //sei();  // Habilitar interrupciones globales
   /*
   // Blink inicial
   for (int i = 0; i < 3; i++) {
@@ -65,9 +91,6 @@ void setup() {
 
 // ====================== INTERRUPCIÓN PARA INPEN ======================
 ISR(INT4_vect) {
-
-  //digitalWrite(LED_BUILTIN, HIGH);  // LED ON cuando llega algo
-
   if (packetReady) {
     PORTB = receivedData[0];
     PORTL = receivedData[1];
@@ -113,14 +136,30 @@ void send24BitsSplit() {
   // - | PINF: Hacemos OR con el valor completo de PORTF
 
   // Enviamos ambas mitades de 12 bits usando nuestra función de envío
+
+
+  // revisar que usa la misma funcion para enviar los 12 bits y esos 12 bits se componen distinto, de parte baja y alta del PORTK
   send12Bits(high12);
   send12Bits(low12);
 }
 
+void send24BitsFlat() {
+  // Combinar los 24 bits planos
+  uint32_t value24 = ((uint32_t)PINA << 16) | ((uint32_t)PINK << 8) | PINF;
+
+  // Partir en 2 bloques de 12 bits
+  uint16_t high12 = (value24 >> 12) & 0x0FFF;
+  uint16_t low12  = value24 & 0x0FFF;
+
+  send12Bits(high12);
+  send12Bits(low12);
+}
+
+
 void test_output_port() {
-  PORTB = 0xff;
-  PORTL = 0xff;
-  PORTC = 0xff;
+  PORTB = 0x00; // parte baja
+  PORTL = 0x80;
+  PORTC = 0x80; // parte alta
   SNW_PORT |= (1 << SNW_BIT);
   delay(1000);
   PORTB = 0x00;
@@ -135,43 +174,49 @@ void test_input_port() {
   uint8_t porta = PINA;
   uint8_t portk = PINK;
   uint8_t portf = PINF;
+  uint8_t porte = PINE;
+  uint8_t porth = PINH;
 
-  // Enviar marco de datos con cabecera y checksum
+  // Enviar marco de datos con cabecera
   Serial.write(0x40);  // Cabecera
   Serial.write(porta);
   Serial.write(portk);
   Serial.write(portf);
+  Serial.write(porte);
+  Serial.write(porth);
   delay(1000);
 }
 
 // ====================== LOOP PRINCIPAL ======================
 void loop() {
-  /*
-  // Manejamos llegada de datos por USB
+  //Serial.write(0x52);
+  //delay(1000);
+
+  // Mientras no esté en RESET, o sea cuando RESET esté en 1 (pin 3 MEGA)
+  //while (PINE & (1 << PE5)) {
+    //Serial.write(0x40);
+    //delay(1000);
+    /*
+  // Manejamos llegada de datos por USB (se envían en la interrupoción de INPEN)
   while (Serial.available()) {
     receivedData[dataIndex++] = Serial.read();
 
     if (dataIndex >= 3) {
       dataIndex = 0;
       packetReady = true;
-      if (receivedData[0] == '0' && receivedData[1] == '1' && receivedData[2] == '2') {
-        digitalWrite(LED_BUILTIN, HIGH);  // LED ON cuando llega algo
-        delay(100);
-        digitalWrite(LED_BUILTIN, LOW);  // LED ON cuando llega algo
       }
-    }
   }
  */
-  // Manejamos OUTPACK
-  SNW_PORT &= ~(1 << SNW_BIT);  // Habilitar SNW (LOW)
-                                // Si OUTPACK (PJ1) esta activo, envio los 24 bits
-  while (PINE & (1 << PE1)) {   // Mientras PE1 está HIGH (1)
-                                // Código cuando OUTPACK está ACTIVO (HIGH)
-  }
-  if (!(PINE & (1 << PE1))) {
-    SNW_PORT |= (1 << SNW_BIT);  // Deshabilitar SNW (HIGH)
-    send24BitsSplit();
-    //delayMicroseconds(1);
-    //delay(1000);
-  }
+    // Manejamos OUTPACK
+    SNW_PORT &= ~(1 << SNW_BIT);    // Habilitar SNW (LOW)
+                                    // Si OUTPACK (PJ1) esta activo, envio los 24 bits
+    while (PINH & (1 << PH3)) {     // OUTPACK em 1
+    }
+    if (!(PINH & (1 << PH3))) {     // si OUTPACK es 0
+      SNW_PORT |= (1 << SNW_BIT);   // Deshabilitar SNW (HIGH)
+      send24BitsSplit();            // leo los 24 bit y los envío
+      //Serial.flush();
+      //send24BitsFlat();
+    }
+ // }
 }
