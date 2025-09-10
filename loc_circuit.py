@@ -17,11 +17,10 @@ def draw_char(img, col, row, char_code, borders, color):
     # Dibujar fondo
     img[start_y:start_y+CHAR_HEIGHT, start_x:start_x+CHAR_WIDTH] = COLOR_MAP[color]
     
-    # Dibujar bordes, hago una AND con los 3 bordes posibles y me fijo que linea tengo que dibujar
+    # Dibujar bordes, hago una AND para ver que bordes dibujo
     if borders & 0b001: img[start_y, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # arriba
     if borders & 0b010: img[start_y:start_y+CHAR_HEIGHT, start_x] = (128, 128, 128) # izquierda
     if borders & 0b100: img[start_y+CHAR_HEIGHT-1, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # abajo
-
     
     # Versión compatible con strings y números
     char = chr(char_code)
@@ -61,7 +60,7 @@ def serial_receiver():
         return (word & 0x3F) + 1
 
     # Abrir el archivo manualmente
-    # archivo = open('datos_octal.txt', 'a')
+    #archivo = open('datos_octal.txt', 'a')
     
     try:
     
@@ -76,11 +75,12 @@ def serial_receiver():
                 word = get_word(buffer[:2])
                 buffer = buffer[2:]  # Consumir los bytes procesados
                 
-                # octal_word = f"{word:04o}"  # Formato octal de 4 dígitos
-                # print(f"{word:08b}")   
+                # Convertir palabra a octal (4 dígitos con padding de ceros)
+                #octal_word = f"{word:04o}"  # Formato octal de 4 dígitos
+                #print(f"{word:08b}")   
                 # Escribir en archivo
-                # archivo.write(octal_word + '\n')
-                # print(octal_word)
+                #archivo.write(octal_word + '\n')
+                #print(octal_word)
                 
                 if state == "WAIT_STX":
                     if word == STX:
@@ -93,12 +93,18 @@ def serial_receiver():
                     if word == ETX:
                         packet_active = False
                         state = "WAIT_STX"
+                        #print("ETX\n")
+                        #print(octal_word)  # Guardar ETX en octal
                     
                     elif word == VT:
                         state = "READ_ROW"
+                        #print("VT\n")
+                        #print(octal_word)  # Guardar VT en octal
                     
                     elif word == HT:
                         state = "READ_COL"
+                        #print("HT\n")
+                        #print(octal_word)  # Guardar HT en octal
                     
                     elif packet_active:
                         # Procesar como carácter
@@ -119,19 +125,20 @@ def serial_receiver():
                         state = "READ_ROW"
                     else:
                         current_row = decode_position(word)
+                    #print(current_row)
+                    #print(octal_word)  # Guardar valor de fila en octal
                         state = "IN_PACKET"
                 
                 elif state == "READ_COL":
-                    if word == HT:
-                        state = "READ_COL"
-                    else:
-                        current_col = decode_position(word)
-                        state = "IN_PACKET"
+                    current_col = decode_position(word)
+                    #print(current_col)
+                    #print(octal_word)  # Guardar valor de columna en octal
+                    state = "IN_PACKET"
 
     except KeyboardInterrupt:
         print("\nInterrupción recibida, cerrando archivo...")
     finally:
-        archivo.close()  # Cerrar el archivo
+        #archivo.close()  # Cerrar el archivo
         ser.close()      # Cerrar el serial
 
 def mouse_callback(event, x, y, flags, param):
@@ -149,6 +156,8 @@ def mouse_callback(event, x, y, flags, param):
             lightpen_active = True  # Booleano directo
 
             print(f"\nFila {row+1}, Columna {col+1} - {'LOC' if is_loc else 'No es LOC'}")
+            
+            #print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
 
             # Empaquetar con booleanos válidos
             data = pack_data(
@@ -174,6 +183,7 @@ def mouse_callback(event, x, y, flags, param):
 
 def send_24bits(data):    
     ser.write(data)
+    #print(f"bytes enviados: {data.hex()}")
 
 def pack_data(valid, lightpen_active, column, points, row, lines):
     # Validar rangos de los parámetros
@@ -208,11 +218,12 @@ def save_vram(filename):
         print(f"VRAM guardada en {filename}")
 
 # Configuración de comunicación serial
-SERIAL_PORT = '/dev/ttyACM1'
+SERIAL_PORT = '/dev/ttyACM0'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
-CHAR_WIDTH, CHAR_HEIGHT = 10, 14
+#CHAR_WIDTH, CHAR_HEIGHT = int(10*1.625), int(14*1.338)
+CHAR_WIDTH, CHAR_HEIGHT = 10,  14
 SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
 
 # Mapa de colores (BF1-BF2)
@@ -234,8 +245,10 @@ serial_thread = threading.Thread(target=serial_receiver, daemon=True)
 serial_thread.start()
 
 # Configurar ventana y callback de mouse
-cv2.namedWindow('Video LCC', cv2.WINDOW_NORMAL)
-cv2.resizeWindow('Video LCC', SCREEN_WIDTH, SCREEN_HEIGHT)
+#cv2.namedWindow('Video LCC', cv2.WINDOW_NORMAL)
+#cv2.resizeWindow('Video LCC', SCREEN_WIDTH, SCREEN_HEIGHT)
+cv2.namedWindow("Video LCC", cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty("Video LCC", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 cv2.setMouseCallback('Video LCC', mouse_callback)
 
 # Inicializar cámara
@@ -243,6 +256,7 @@ cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 if not cap.isOpened():
     print("Error al abrir la cámara")
     exit()
+
 
 # Bucle principal
 while True:
@@ -253,6 +267,7 @@ while True:
     
     # Redimensionar y convertir frame
     frame = cv2.resize(frame, (SCREEN_WIDTH, SCREEN_HEIGHT))
+    #frame = cv2.resize(frame, (1024, 768))
     overlay = frame.copy()
     
     # Dibujar caracteres desde VRAM
@@ -265,7 +280,8 @@ while True:
     
     # Mezclar overlay con transparencia
     cv2.addWeighted(overlay, 0.99, frame, 0.1, 0, frame)
-    
+
+    frame = cv2.resize(frame, (1366, 768))
     # Mostrar resultado
     cv2.imshow('Video LCC', frame)
     
