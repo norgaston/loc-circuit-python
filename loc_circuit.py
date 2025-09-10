@@ -4,7 +4,7 @@ import subprocess
 from font import *
 from vram import *
 
-# Función para decodificar caracteres
+# Función para decodificar caracteres (12 bits)
 def decode_char(value):
     char_code = value & 0x7F       # Bits 6-0: ASCII
     borders = (value >> 7) & 0x7   # Bits 9-7: bordes
@@ -17,10 +17,11 @@ def draw_char(img, col, row, char_code, borders, color):
     # Dibujar fondo
     img[start_y:start_y+CHAR_HEIGHT, start_x:start_x+CHAR_WIDTH] = COLOR_MAP[color]
     
-    # Dibujar bordes
-    if borders & 0b100: img[start_y+CHAR_HEIGHT-1, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # abajo
-    if borders & 0b010: img[start_y:start_y+CHAR_HEIGHT, start_x] = (128, 128, 128) # izquierda
+    # Dibujar bordes, hago una AND con los 3 bordes posibles y me fijo que linea tengo que dibujar
     if borders & 0b001: img[start_y, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # arriba
+    if borders & 0b010: img[start_y:start_y+CHAR_HEIGHT, start_x] = (128, 128, 128) # izquierda
+    if borders & 0b100: img[start_y+CHAR_HEIGHT-1, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # abajo
+
     
     # Versión compatible con strings y números
     char = chr(char_code)
@@ -60,7 +61,7 @@ def serial_receiver():
         return (word & 0x3F) + 1
 
     # Abrir el archivo manualmente
-    archivo = open('datos_octal.txt', 'a')
+    # archivo = open('datos_octal.txt', 'a')
     
     try:
     
@@ -75,11 +76,11 @@ def serial_receiver():
                 word = get_word(buffer[:2])
                 buffer = buffer[2:]  # Consumir los bytes procesados
                 
-                # Convertir palabra a octal (4 dígitos con padding de ceros)
-                octal_word = f"{word:04o}"  # Formato octal de 4 dígitos
+                # octal_word = f"{word:04o}"  # Formato octal de 4 dígitos
+                # print(f"{word:08b}")   
                 # Escribir en archivo
-                #archivo.write(octal_word + '\n')
-                #print(octal_word)
+                # archivo.write(octal_word + '\n')
+                # print(octal_word)
                 
                 if state == "WAIT_STX":
                     if word == STX:
@@ -92,18 +93,12 @@ def serial_receiver():
                     if word == ETX:
                         packet_active = False
                         state = "WAIT_STX"
-                        #print("ETX\n")
-                        #print(octal_word)  # Guardar ETX en octal
                     
                     elif word == VT:
                         state = "READ_ROW"
-                        #print("VT\n")
-                        #print(octal_word)  # Guardar VT en octal
                     
                     elif word == HT:
                         state = "READ_COL"
-                        #print("HT\n")
-                        #print(octal_word)  # Guardar HT en octal
                     
                     elif packet_active:
                         # Procesar como carácter
@@ -112,7 +107,6 @@ def serial_receiver():
                             if 1 <= current_row <= ROWS and 1 <= current_col <= COLS:
                                 vram[current_row-1, current_col-1] = char_data
                                 # Imprimir el valor octal en lugar del carácter
-                                #print(octal_word)
                                 current_col += 1
                                 if current_col > COLS:
                                     current_col = 1
@@ -121,16 +115,18 @@ def serial_receiver():
                                         current_row = 1
                 
                 elif state == "READ_ROW":
-                    current_row = decode_position(word)
-                    #print(current_row)
-                    #print(octal_word)  # Guardar valor de fila en octal
-                    state = "IN_PACKET"
+                    if word == VT:
+                        state = "READ_ROW"
+                    else:
+                        current_row = decode_position(word)
+                        state = "IN_PACKET"
                 
                 elif state == "READ_COL":
-                    current_col = decode_position(word)
-                    #print(current_col)
-                    #print(octal_word)  # Guardar valor de columna en octal
-                    state = "IN_PACKET"
+                    if word == HT:
+                        state = "READ_COL"
+                    else:
+                        current_col = decode_position(word)
+                        state = "IN_PACKET"
 
     except KeyboardInterrupt:
         print("\nInterrupción recibida, cerrando archivo...")
@@ -153,8 +149,6 @@ def mouse_callback(event, x, y, flags, param):
             lightpen_active = True  # Booleano directo
 
             print(f"\nFila {row+1}, Columna {col+1} - {'LOC' if is_loc else 'No es LOC'}")
-            
-            #print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
 
             # Empaquetar con booleanos válidos
             data = pack_data(
@@ -180,7 +174,6 @@ def mouse_callback(event, x, y, flags, param):
 
 def send_24bits(data):    
     ser.write(data)
-    #print(f"bytes enviados: {data.hex()}")
 
 def pack_data(valid, lightpen_active, column, points, row, lines):
     # Validar rangos de los parámetros
@@ -215,13 +208,10 @@ def save_vram(filename):
         print(f"VRAM guardada en {filename}")
 
 # Configuración de comunicación serial
-#SERIAL_PORT = '/dev/ttyUSB0'
-SERIAL_PORT = '/dev/ttyACM0'
-#BAUDRATE = 115200
+SERIAL_PORT = '/dev/ttyACM1'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
-#COLS, ROWS = 64, 41
 CHAR_WIDTH, CHAR_HEIGHT = 10, 14
 SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
 
@@ -232,10 +222,6 @@ COLOR_MAP = {
     0b10: (255, 255, 255), # Blanco
     0b11: (0, 0, 0)        # Negro
 }
-
-# Inicializar VRAM
-#vram = np.zeros((ROWS, COLS), dtype=np.uint16)
-#vram_lock = threading.Lock()
 
 vram = vram
 vram_lock = vram_lock
@@ -254,11 +240,9 @@ cv2.setMouseCallback('Video LCC', mouse_callback)
 
 # Inicializar cámara
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-#cap = cv2.VideoCapture(2)
 if not cap.isOpened():
     print("Error al abrir la cámara")
     exit()
-
 
 # Bucle principal
 while True:
