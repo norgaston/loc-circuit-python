@@ -41,6 +41,7 @@ void loop() {
     PORTK = mid;
     PORTA = high;
 
+    // Feedback tx
     digitalWrite(LED_BUILTIN, HIGH);
     // Espero a que SNW baje (activo bajo)
     while (digitalRead(PIN_SNW) != LOW);  
@@ -50,11 +51,8 @@ void loop() {
     while (digitalRead(PIN_SNW) != HIGH);
     // Con SNW inactivo , hago OUTPACK alto (inactivo)
     digitalWrite(PIN_OUTPACK, HIGH);
-
-    //Serial.print("Dato enviado (octal): ");
-    //Serial.println(valores[i], OCT);
-
+    // Feedback tx
     digitalWrite(LED_BUILTIN, LOW);
   }
-  delay(10000);
+  delay(5000);
 }

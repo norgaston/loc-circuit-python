@@ -17,7 +17,7 @@ def draw_char(img, col, row, char_code, borders, color):
     # Dibujar fondo
     img[start_y:start_y+CHAR_HEIGHT, start_x:start_x+CHAR_WIDTH] = COLOR_MAP[color]
     
-    # Dibujar bordes, hago una AND para ver que bordes dibujo
+    # Dibujar bordes, le hago una AND a cada bit para ver que dibujo
     if borders & 0b001: img[start_y, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # arriba
     if borders & 0b010: img[start_y:start_y+CHAR_HEIGHT, start_x] = (128, 128, 128) # izquierda
     if borders & 0b100: img[start_y+CHAR_HEIGHT-1, start_x:start_x+CHAR_WIDTH] = (128, 128, 128) # abajo
@@ -50,6 +50,7 @@ def serial_receiver():
     VT = 0x00B
     HT = 0x009
     ETX = 0x003
+    BL = 0x000
     
     def get_word(data):
         """Combina 2 bytes en una palabra de 16 bits y aplica máscara de 12 bits"""
@@ -105,6 +106,11 @@ def serial_receiver():
                         state = "READ_COL"
                         #print("HT\n")
                         #print(octal_word)  # Guardar HT en octal
+
+                    elif word == BL:
+                        state = "IN_PACKET"
+                        #print("BL\n")
+                        #print(octal_word)  # Guardar HT en octal
                     
                     elif packet_active:
                         # Procesar como carácter
@@ -130,7 +136,10 @@ def serial_receiver():
                         state = "IN_PACKET"
                 
                 elif state == "READ_COL":
-                    current_col = decode_position(word)
+                    if word == HT:
+                        state = "READ_COL"
+                    else:
+                        current_col = decode_position(word)
                     #print(current_col)
                     #print(octal_word)  # Guardar valor de columna en octal
                     state = "IN_PACKET"
@@ -143,6 +152,8 @@ def serial_receiver():
 
 def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN:
+        x = int(x/(SCREEN_WIDTH_MONITOR/SCREEN_WIDTH))
+        y = int(y/(SCREEN_HEIGHT_MONITOR/SCREEN_HEIGHT))
         col, row = x // CHAR_WIDTH, y // CHAR_HEIGHT
         
         if 0 <= col < COLS and 0 <= row < ROWS:
@@ -156,9 +167,7 @@ def mouse_callback(event, x, y, flags, param):
             lightpen_active = True  # Booleano directo
 
             print(f"\nFila {row+1}, Columna {col+1} - {'LOC' if is_loc else 'No es LOC'}")
-            
-            #print(f"Point: {(x%10)+1} Line: {(y%14)+1}")
-
+ 
             # Empaquetar con booleanos válidos
             data = pack_data(
                 valid=is_loc,
@@ -222,16 +231,17 @@ SERIAL_PORT = '/dev/ttyACM0'
 BAUDRATE = 500000
 
 # Configuración de la pantalla
-#CHAR_WIDTH, CHAR_HEIGHT = int(10*1.625), int(14*1.338)
-CHAR_WIDTH, CHAR_HEIGHT = 10,  14
-SCREEN_WIDTH, SCREEN_HEIGHT = 631, ROWS * CHAR_HEIGHT
+CHAR_WIDTH, CHAR_HEIGHT = 10, 14
+SCREEN_WIDTH, SCREEN_HEIGHT = 631, 574
+#SCREEN_WIDTH_MONITOR, SCREEN_HEIGHT_MONITOR = 1280, 1024
+SCREEN_WIDTH_MONITOR, SCREEN_HEIGHT_MONITOR = 1366, 768
 
 # Mapa de colores (BF1-BF2)
 COLOR_MAP = {
-    0b00: (0, 0, 0),       # Negro
-    0b01: (127, 127, 127), # Gris
-    0b10: (255, 255, 255), # Blanco
-    0b11: (0, 0, 0)        # Negro
+    0b00: (0, 0, 0),        # Negro
+    0b01: (177, 177, 177),  # Gris
+    0b10: (255, 0, 0),      # Blanco
+    0b11: (127, 127, 0)     # Negro
 }
 
 vram = vram
@@ -245,10 +255,8 @@ serial_thread = threading.Thread(target=serial_receiver, daemon=True)
 serial_thread.start()
 
 # Configurar ventana y callback de mouse
-#cv2.namedWindow('Video LCC', cv2.WINDOW_NORMAL)
-#cv2.resizeWindow('Video LCC', SCREEN_WIDTH, SCREEN_HEIGHT)
-cv2.namedWindow("Video LCC", cv2.WND_PROP_FULLSCREEN)
-cv2.setWindowProperty("Video LCC", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+cv2.namedWindow('Video LCC', cv2.WND_PROP_FULLSCREEN)
+#cv2.setWindowProperty('Video LCC', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 cv2.setMouseCallback('Video LCC', mouse_callback)
 
 # Inicializar cámara
@@ -256,7 +264,6 @@ cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 if not cap.isOpened():
     print("Error al abrir la cámara")
     exit()
-
 
 # Bucle principal
 while True:
@@ -267,7 +274,6 @@ while True:
     
     # Redimensionar y convertir frame
     frame = cv2.resize(frame, (SCREEN_WIDTH, SCREEN_HEIGHT))
-    #frame = cv2.resize(frame, (1024, 768))
     overlay = frame.copy()
     
     # Dibujar caracteres desde VRAM
@@ -280,8 +286,7 @@ while True:
     
     # Mezclar overlay con transparencia
     cv2.addWeighted(overlay, 0.99, frame, 0.1, 0, frame)
-
-    frame = cv2.resize(frame, (1366, 768))
+    frame = cv2.resize(frame, (SCREEN_WIDTH_MONITOR, SCREEN_HEIGHT_MONITOR))
     # Mostrar resultado
     cv2.imshow('Video LCC', frame)
     
@@ -290,9 +295,15 @@ while True:
     if key == ord('q'):  # Tecla 'q' → Apagar
         subprocess.run(["sudo", "shutdown", "-h", "now"], check=True)
         break
+    if key == ord('s'):
+        # Guardar la imagen en un archivo
+        cv2.imwrite('imagen_capturada.jpg', frame)
     elif key == 27:     # Tecla ESC → Solo salir
         break
 
 # Limpieza
 cap.release()
 cv2.destroyAllWindows()
+
+
+
